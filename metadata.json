@@ -1,0 +1,6 @@
+{
+  "name": "Chola Empire Construction Accounts",
+  "description": "Project-wise construction accounting, material & labour ledgers, client pending balances, P&L reports, PDF invoices, and bilingual Tamil/English offline-first backup.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,193 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && isVerified() && request.auth.uid == userId;
+    }
+
+    function isValidWorkspace(data, userId) {
+      return data.keys().hasAll(['uid', 'companyName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'companyName', 'createdAt', 'updatedAt'])
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidClient(data, clientId, userId) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'phone', 'address', 'gstNumber', 'notes', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'name', 'phone', 'address', 'gstNumber', 'notes', 'createdAt', 'updatedAt'])
+        && data.id == clientId
+        && isValidId(data.id)
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.phone is string && data.phone.size() <= 32
+        && data.address is string && data.address.size() <= 240
+        && data.gstNumber is string && data.gstNumber.size() <= 32
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProject(data, projectId, userId) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'clientId', 'location', 'contractValue', 'status', 'notes', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'name', 'clientId', 'location', 'contractValue', 'status', 'notes', 'createdAt', 'updatedAt'])
+        && data.id == projectId
+        && isValidId(data.id)
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && data.clientId is string && data.clientId.size() <= 128
+        && data.location is string && data.location.size() <= 140
+        && data.contractValue is number && data.contractValue >= 0
+        && data.status in ['ACTIVE', 'ON_HOLD', 'COMPLETED']
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data, txId, userId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'projectId', 'clientId', 'type', 'category',
+          'title', 'partyName', 'quantity', 'unit', 'unitRate', 'amount',
+          'paymentMode', 'referenceNo', 'dateMillis', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'projectId', 'clientId', 'type', 'category',
+          'title', 'partyName', 'quantity', 'unit', 'unitRate', 'amount',
+          'paymentMode', 'referenceNo', 'dateMillis', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.id == txId
+        && isValidId(data.id)
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.projectId)
+        && data.clientId is string && data.clientId.size() <= 128
+        && data.type in ['INCOME_CUSTOMER_PAYMENT', 'EXPENSE_MATERIAL', 'EXPENSE_LABOUR', 'EXPENSE_SITE']
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 48
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.partyName is string && data.partyName.size() <= 120
+        && data.quantity is number && data.quantity >= 0
+        && data.unit is string && data.unit.size() <= 32
+        && data.unitRate is number && data.unitRate >= 0
+        && data.amount is number && data.amount > 0
+        && data.paymentMode in ['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE']
+        && data.referenceNo is string && data.referenceNo.size() <= 64
+        && data.dateMillis is number && data.dateMillis > 0
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidWorkspace(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidWorkspace(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'updatedAt']);
+      allow delete: if isValidId(userId) && isOwner(userId);
+
+      match /clients/{clientId} {
+        allow get: if isValidId(userId) && isValidId(clientId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(clientId)
+          && isOwner(userId)
+          && isValidClient(incoming(), clientId, userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId) && isValidId(clientId)
+          && isOwner(userId)
+          && isValidClient(incoming(), clientId, userId)
+          && incoming().id == existing().id
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'address', 'gstNumber', 'notes', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(clientId) && isOwner(userId);
+      }
+
+      match /projects/{projectId} {
+        allow get: if isValidId(userId) && isValidId(projectId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(projectId)
+          && isOwner(userId)
+          && isValidProject(incoming(), projectId, userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId) && isValidId(projectId)
+          && isOwner(userId)
+          && isValidProject(incoming(), projectId, userId)
+          && incoming().id == existing().id
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'clientId', 'location', 'contractValue', 'status', 'notes', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(projectId) && isOwner(userId);
+      }
+
+      match /transactions/{txId} {
+        allow get: if isValidId(userId) && isValidId(txId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(txId)
+          && isOwner(userId)
+          && isValidTransaction(incoming(), txId, userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId))
+          && existsAfter(/databases/$(database)/documents/users/$(userId)/projects/$(incoming().projectId));
+        allow update: if isValidId(userId) && isValidId(txId)
+          && isOwner(userId)
+          && isValidTransaction(incoming(), txId, userId)
+          && incoming().id == existing().id
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId)/projects/$(incoming().projectId))
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'projectId', 'clientId', 'type', 'category', 'title', 'partyName',
+            'quantity', 'unit', 'unitRate', 'amount', 'paymentMode', 'referenceNo',
+            'dateMillis', 'notes', 'updatedAt'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(txId) && isOwner(userId);
+      }
+    }
+  }
+}
